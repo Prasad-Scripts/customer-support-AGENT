@@ -5,6 +5,7 @@ A Streamlit customer-support assistant that maintains a separate Hindsight memor
 ## Contents
 
 - [Capabilities](#capabilities)
+- [Screenshots](#screenshots)
 - [System Architecture](#system-architecture)
 - [Customer Isolation and Data Lifecycle](#customer-isolation-and-data-lifecycle)
 - [Conversation and Memory Flow](#conversation-and-memory-flow)
@@ -26,6 +27,24 @@ A Streamlit customer-support assistant that maintains a separate Hindsight memor
 - Clear the selected customer's chat without deleting their Hindsight memories.
 - Display the memories used for an assistant response and the note retained after an exchange.
 - Fall back between two configured Groq models if a model request fails.
+
+## Screenshots
+
+Hari reports a delayed order and states a preference for email updates:
+
+![Customer support conversation with Hari about a delayed order and email updates](screenshots/Image1.png)
+
+The agent recalls Hari's preferred update channel in a later conversation:
+
+![The agent recalls that Hari prefers email updates](screenshots/Image2.png)
+
+Customer profiles keep their conversations separate when switching between customers:
+
+![Customer profile selector showing separate Hari and Steven profiles](screenshots/Image3.png)
+
+Steven's bank recalls a damaged-order report independently of Hari's history:
+
+![The agent recalls Steven's earlier damaged-order report](screenshots/Image4.png)
 
 ## System Architecture
 
@@ -158,15 +177,15 @@ The application sends the customer message and generated reply to Groq for memor
 
 ## Manual Isolation Test
 
-Use separate profiles and ask the same recall question to confirm bank isolation:
+Use the **Hari** and **Steven** profiles shown in the screenshots to confirm bank isolation:
 
-1. Create **Hari** and send: `I use an Android phone.` Confirm a memory note is saved.
-2. Create **Rahul** and ask: `What phone do I use?` Rahul should not receive Hari's Android memory.
-3. Tell Rahul: `I use an iPhone.` Confirm a memory note is saved.
-4. Create **Priya** and ask the same question. Priya should not receive either device memory.
-5. Switch back to Hari and ask the question. Hari should recall Android.
-6. Switch to Rahul and ask the question. Rahul should recall iPhone.
-7. Switch to Priya and ask the question again. Priya should remain without either phone fact.
+1. Select **Hari** and send: `I usually prefer updates through email rather than phone calls.` Confirm a memory note is saved.
+2. Switch to **Steven** and ask: `What update method do I prefer?` Steven should not receive Hari's email preference.
+3. Tell Steven: `My order #7821 arrived damaged.` Confirm a memory note is saved.
+4. Ask Steven: `What issue did I report earlier?` Steven should recall the damaged order.
+5. Switch to Hari and ask: `What issue did I report earlier?` Hari should not receive Steven's damaged-order memory.
+6. Ask Hari: `How do I prefer to receive updates?` Hari should recall email.
+7. Switch back to Steven and ask: `What update method do I prefer?` Steven should still have no email-preference memory.
 
 ## Repository Layout
 
