@@ -4,6 +4,7 @@ import uuid
 import streamlit as st
 
 from agent import (
+    ensure_bank,
     generate_reply,
     recall_history,
     reflect_profile,
@@ -16,12 +17,17 @@ st.set_page_config(page_title="Memory-Powered Support Agent", page_icon="🎧", 
 def ensure_profile_state():
     if "chats" not in st.session_state:
         st.session_state.chats = {}
-    if "custom_profile" not in st.session_state:
-        st.session_state.custom_profile = None
+    if "customer_profiles" not in st.session_state:
+        st.session_state.customer_profiles = {}
+    legacy_profile = st.session_state.pop("custom_profile", None)
+    if legacy_profile is not None:
+        st.session_state.customer_profiles.setdefault(legacy_profile["id"], legacy_profile)
+    if "active_profile_id" not in st.session_state:
+        st.session_state.active_profile_id = None
+    if st.session_state.active_profile_id not in st.session_state.customer_profiles:
+        st.session_state.active_profile_id = next(iter(st.session_state.customer_profiles), None)
     if "show_create_form" not in st.session_state:
         st.session_state.show_create_form = False
-    if "show_replace_confirm" not in st.session_state:
-        st.session_state.show_replace_confirm = False
 
 
 def create_customer_profile(name: str):
@@ -35,11 +41,20 @@ def create_customer_profile(name: str):
         "plan": "",
         "env": "",
     }
-    st.session_state.custom_profile = profile
+    st.session_state.customer_profiles[profile["id"]] = profile
+    st.session_state.active_profile_id = profile["id"]
     st.session_state.chats[profile["id"]] = []
+    ensure_bank(profile)
     st.session_state.show_create_form = False
-    st.session_state.show_replace_confirm = False
     return profile
+
+
+def submit_customer_profile():
+    try:
+        create_customer_profile(st.session_state.get("new_profile_name", ""))
+        st.session_state.profile_creation_error = None
+    except ValueError as e:
+        st.session_state.profile_creation_error = str(e)
 
 
 ensure_profile_state()
@@ -49,53 +64,28 @@ with st.sidebar:
     st.header("Controls")
     st.subheader("Customer Profile")
 
-    customer = st.session_state.custom_profile
-
-    if customer is not None:
-        selected_customer = st.selectbox(
+    profiles = st.session_state.customer_profiles
+    profile_ids = list(profiles)
+    if profile_ids:
+        st.selectbox(
             "Customer Profile",
-            [customer],
-            index=0,
-            format_func=lambda c: c["name"],
+            profile_ids,
+            key="active_profile_id",
+            format_func=lambda profile_id: profiles[profile_id]["name"],
         )
-        st.session_state.custom_profile = selected_customer
-        customer = selected_customer
 
     if st.button("+ Create New Profile", use_container_width=True):
-        if st.session_state.custom_profile is not None:
-            st.session_state.show_replace_confirm = True
-        else:
-            st.session_state.show_create_form = True
-
-    if st.session_state.get("show_replace_confirm"):
-        st.warning("A customer profile already exists. Creating a new profile will start a fresh customer profile and conversation. Continue?")
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Continue", use_container_width=True):
-                old_id = st.session_state.custom_profile["id"] if st.session_state.custom_profile else None
-                if old_id and old_id in st.session_state.chats:
-                    del st.session_state.chats[old_id]
-                st.session_state.custom_profile = None
-                st.session_state.show_replace_confirm = False
-                st.session_state.show_create_form = True
-                st.rerun()
-        with col2:
-            if st.button("Cancel", use_container_width=True):
-                st.session_state.show_replace_confirm = False
-                st.rerun()
+        st.session_state.show_create_form = True
 
     if st.session_state.get("show_create_form"):
         with st.form("create_profile_form", clear_on_submit=False):
             st.subheader("Create Customer Profile")
-            name = st.text_input("Name")
-            submitted = st.form_submit_button("Create Profile")
-            if submitted:
-                try:
-                    create_customer_profile(name)
-                    st.rerun()
-                except ValueError as e:
-                    st.error(str(e))
+            st.text_input("Name", key="new_profile_name")
+            st.form_submit_button("Create Profile", on_click=submit_customer_profile)
+        if st.session_state.get("profile_creation_error"):
+            st.error(st.session_state.profile_creation_error)
 
+    customer = profiles.get(st.session_state.active_profile_id)
     if customer is not None:
         st.divider()
         if st.button("Clear this chat", use_container_width=True):
@@ -112,7 +102,7 @@ with st.sidebar:
                     st.error(f"Reflect failed: {e}")
 
 # ---------------- Main ----------------
-customer = st.session_state.custom_profile
+customer = st.session_state.customer_profiles.get(st.session_state.active_profile_id)
 
 if customer is None:
     st.title("🎧 Memory-Powered Customer Support Agent")

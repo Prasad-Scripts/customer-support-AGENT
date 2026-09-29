@@ -1,4 +1,5 @@
 """Core logic: Hindsight memory (retain / recall / reflect) + Groq LLM."""
+import asyncio
 import os
 import re
 import threading
@@ -18,35 +19,39 @@ MODELS = ["openai/gpt-oss-120b", "qwen/qwen3-32b"]
 _hs = None
 _llm = None
 _banks_ready = set()
+_hs_loop = None
+_hs_loop_thread = None
+_hs_loop_lock = threading.Lock()
+
+
+def _run_hindsight_loop(ready: threading.Event) -> None:
+    global _hs_loop
+    _hs_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(_hs_loop)
+    ready.set()
+    _hs_loop.run_forever()
+
+
+def _hindsight_loop():
+    global _hs_loop_thread
+    with _hs_loop_lock:
+        if _hs_loop_thread is None or not _hs_loop_thread.is_alive():
+            ready = threading.Event()
+            _hs_loop_thread = threading.Thread(
+                target=_run_hindsight_loop,
+                args=(ready,),
+                name="hindsight-event-loop",
+                daemon=True,
+            )
+            _hs_loop_thread.start()
+            ready.wait()
+        return _hs_loop
 
 
 def _safe_hindsight_call(fn, *args, **kwargs):
-    """Run sync Hindsight calls safely when Streamlit already has an event loop."""
-    try:
-        return fn(*args, **kwargs)
-    except Exception as exc:
-        message = str(exc)
-        if "inside a task" not in message and "event loop" not in message and "run_until_complete" not in message:
-            raise
-
-        result = {}
-        error = {}
-
-        def worker():
-            try:
-                result["value"] = fn(*args, **kwargs)
-            except Exception as e:
-                error["value"] = e
-
-        thread = threading.Thread(target=worker, daemon=True)
-        thread.start()
-        thread.join()
-
-        if "value" in result:
-            return result["value"]
-        if "value" in error:
-            raise error["value"]
-        raise exc
+    """Run async Hindsight calls on one persistent event loop thread."""
+    future = asyncio.run_coroutine_threadsafe(fn(*args, **kwargs), _hindsight_loop())
+    return future.result()
 
 
 def hs() -> Hindsight:
@@ -81,12 +86,9 @@ def ensure_bank(customer: dict) -> None:
     if bid in _banks_ready:
         return
     try:
-        _safe_hindsight_call(hs().create_bank, bank_id=bid, name=customer["name"])
+        _safe_hindsight_call(hs().acreate_bank, bank_id=bid, name=customer["name"])
     except Exception:
-        try:
-            _safe_hindsight_call(hs().banks.create, bank_id=bid, name=customer["name"])
-        except Exception:
-            pass  # bank may already exist, or retain will create it
+        pass  # bank may already exist, or retain will create it
     _banks_ready.add(bid)
 
 
@@ -112,7 +114,7 @@ def recall_history(customer: dict, query: str, limit: int = 3) -> list:
     """RECALL: fetch only the most relevant memory needed for the current question."""
     ensure_bank(customer)
     try:
-        res = _safe_hindsight_call(hs().recall, bank_id=bank_id(customer["id"]), query=query)
+        res = _safe_hindsight_call(hs().arecall, bank_id=bank_id(customer["id"]), query=query)
         return [m.text for m in res.results[:limit]]
     except Exception:
         return []
@@ -122,7 +124,7 @@ def retain_memory(customer: dict, text: str, when: datetime | None = None) -> No
     """RETAIN: store a fact about this customer."""
     ensure_bank(customer)
     _safe_hindsight_call(
-        hs().retain,
+        hs().aretain,
         bank_id=bank_id(customer["id"]),
         content=text,
         context="customer support history",
@@ -134,7 +136,7 @@ def reflect_profile(customer: dict) -> str:
     """REFLECT: let Hindsight synthesize patterns across all memories."""
     ensure_bank(customer)
     out = _safe_hindsight_call(
-        hs().reflect,
+        hs().areflect,
         bank_id=bank_id(customer["id"]),
         query=(
             f"Summarize {customer['name']} as a support customer in under 100 words: "
